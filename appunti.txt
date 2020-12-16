@@ -1,0 +1,25 @@
+ 
+   23  source /usr/local/etc/ocp4.config 
+   26  oc login -u maredan -p f1ef8581790c402fb0eb https://api.eu45.prod.nextcle.com:6443
+   27  oc new-project maredan-docker-build
+oc new-app : se da repository GIT:
+   28  oc new-app --as-deployment-config --name echo https://github.com/maredan/DO288-apps#docker-build --context-dir ubi-echo
+oc new-app : se da immagine:
+   28  oc new-app --as-deployment-config --name echo --docker-image=registry.access.redhat.com/rhl7-mysql57
+ 
+   29  oc status
+   42  oc start-build echo
+   30  oc logs -f bc/echo
+   31  oc get pod
+   32  oc logs echo-1-6ph85 | tail -n 3
+   33  oc describe bc echo
+   34  oc describe is echo
+   35  oc describe dc echo
+
+18  git checkout master
+   19  git checkout -b docker-build
+   20  git push -u origin docker-build
+   38  git commit -a -m 'Add a counter'
+   
+
+
