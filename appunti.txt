@@ -9,6 +9,7 @@ oc new-app : se da immagine:
  
    29  oc status
    42  oc start-build echo
+La build in corso posso bloccarla con oc cancel-build bc/jhost
    30  oc logs -f bc/echo
    31  oc get pod
    32  oc logs echo-1-6ph85 | tail -n 3
@@ -21,5 +22,54 @@ oc new-app : se da immagine:
    20  git push -u origin docker-build
    38  git commit -a -m 'Add a counter'
    
+App per microservizo Java
+oc new-app  --as-deployment-config --name jhost \
+    --build-env MAVEN_MIRROR_URL=http://${RHT_OCP4_NEXUS_SERVER}/repository/java \
+    -i redhat-openjdk18-openshift:1.5 \
+    https://github.com/${RHT_OCP4_GITHUB_USER}/DO288-apps#manage-builds \
+    --context-dir java-serverhost
+
+Trigger:
+Per vedere quali trigger sono abilitati:
+oc describe bc/trigger | grep Triggered
+
+Per fargli capire che una immagine  cambiata (serve solo se le img sono su repository esterni):
+oc import-image php
+
+Accertarsi che una build sia stata scatenata da update di una img:
+oc describe build trigger-2 | grep cause
+
+*** SECRET CREDENZIALI QUAY.IO
+
+Per creare un secret con le credenziali di quay.io in modo che poi OC possa userle per scaricere le immagini:
+- oc cancel-build bc/jhost
+
+A questo punto  skopeo pu usarle per autenticarsi perch legge il json con il token generato da podman ...
+skopeo copy \
+> docker-archive:php-70-rhel7-original.tar.gz \
+> docker://quay.io/${RHT_OCP4_QUAY_USER}/php-70-rhel7:latest
+
+
+.. oc invece lo vuole in un suo secret
+
+The Quay.io registry defaults to private images, so you will have to add a secret to a
+the builder service account in order to access it.
+Create a secret from the container registry API access token that was stored by
+Podman.
+
+oc create secret generic quay-registry \
+ --from-file .dockerconfigjson=${XDG_RUNTIME_DIR}/containers/auth.json \
+ --type kubernetes.io/dockerconfigjson
+oc secrets link builder quay-registry
+
+Ora finalmente OC puo accedere a quay.io come in questo esempio
+
+oc import-image php \
+ --from quay.io/${RHT_OCP4_QUAY_USER}/php-70-rhel7 --confirm
+
+oc new-app --as-deployment-config \
+ --name trigger \
+ php~http://github.com/${RHT_OCP4_GITHUB_USER}/DO288-apps \
+ --context-dir trigger-builds
 
 
