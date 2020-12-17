@@ -31,6 +31,18 @@ oc new-app  --as-deployment-config --name jhost \
     https://github.com/${RHT_OCP4_GITHUB_USER}/DO288-apps#manage-builds \
     --context-dir java-serverhost
 
+Gli script di s2i se voglio sovrascriverli devo salvarli in .s2i/bin nel mio progetto git.
+
+Vedere velocemente il contenuto di una immagine (notare il -i che  per entrarci -interactive- quando parte):
+sudo podman run --name test -it rhscl/httpd-24-rhel7 bash
+sudo podman rm test
+ls /usr/libexec/s2i (un esempio, per vedere gli script offerti a s2i)
+
+Scegliere una image stream invece che asciare sia new-app a deciderla (anche per non usare latest ma una specifica)
+oc new-app --as-deployment-config --name hook \
+  php:7.3~http://github.com/${RHT_OCP4_GITHUB_USER}/DO288-apps \
+ --context-dir post-commit
+
 Trigger:
 Per vedere quali trigger sono abilitati:
 oc describe bc/trigger | grep Triggered
@@ -82,5 +94,113 @@ oc new-app --as-deployment-config \
  --name trigger \
  php~http://github.com/${RHT_OCP4_GITHUB_USER}/DO288-apps \
  --context-dir trigger-builds
+
+*** CREAZIONE BUILD IMAGE, ALIAS PARENT IMAGE
+s2i create s2i-do288-httpd s2i-do288-httpd (la prima e' il nome dell'img, la seconda la dir che viene creata)
+tree -a s2i-do288-httpd
+
+Nel dockerfile  importante il tag builder, come in questo esempio:
+# This label is used to categorize this image as a builder image in the
+# OpenShift web console.
+LABEL io.openshift.tags="builder, httpd, httpd24"
+
+cd s2i-do288-httpd
+sudo podman build -t s2i-do288-httpd .
+sudo podman images (per verificare che la buiolder image sia stata creata, es localhost/s2i-do288-httpd )
+Ora posso usarla per craere la mia application container image.
+Ad esempio mi metto un index.html in ~/s2i-do288-httpd/test/test-app/ e poi:
+mkdir /home/student/s2i-sample-app
+s2i build test/test-app/ \
+>  s2i-do288-httpd s2i-sample-app \
+>  --as-dockerfile ~/s2i-sample-app/Dockerfile
+cd ~/s2i-sample-app
+tree .
+Qui ho il dockerfile generato dalla build, che non deve pi contenere il suddetto tag build visto che ora  una app.
+Di nuovo quindi (mi raccomando il "." finale per indicare la dir corrente !):
+sudo podman build \
+> --format docker -t s2i-sample-app .
+Con "sudo podman images" trovero' una immagine tipo localhost/s2i-sample-app 
+
+ 738  lab apache-s2i start
+  739  s2i version
+  740  s2i create s2i-do288-httpd s2i-do288-httpd
+  741  tree -a s2i-do288-httpd
+  742  cp ~/DO288/labs/apache-s2i/Dockerfile ~/s2i-do288-httpd/
+  743  cp -Rv ~/DO288/labs/apache-s2i/s2i ~/s2i-do288-httpd/
+  744  rm -f ~/s2i-do288-httpd/s2i/bin/save-artifacts
+  745  cd s2i-do288-httpd
+  746  sudo podman build -t s2i-do288-httpd .
+  747  \
+  748  sudo skopeo copy  containers-storage:localhost/s2i-do288-httpd  docker://quay.io/${RHT_OCP4_QUAY_USER}/s2i-do288-httpd 
+  749  source /usr/local/etc/ocp4.config
+  750  sudo podman login  -u ${RHT_OCP4_QUAY_USER} quay.io
+  751  sudo skopeo copy  containers-storage:localhost/s2i-do288-httpd  docker://quay.io/${RHT_OCP4_QUAY_USER}/s2i-do288-httpd
+  752  oc login -u ${RHT_OCP4_DEV_USER}  -p ${RHT_OCP4_DEV_PASSWORD} ${RHT_OCP4_MASTER_API}
+  753  oc new-project  ${RHT_OCP4_DEV_USER}-apache-s2i
+  754  podman login  -u ${RHT_OCP4_QUAY_USER} quay.io
+  755  oc create secret generic quayio  --from-file .dockerconfigjson=${XDG_RUNTIME_DIR}/containers/auth.json  --type=kubernetes.io/dockerconfigjson
+  756  oc secrets link builder quayio
+  757  oc import-image s2i-do288-httpd  --from quay.io/${RHT_OCP4_QUAY_USER}/s2i-do288-httpd --confirm
+  758  oc get is
+  759  oc new-app --as-deployment-config  --name hello-s2i  s2i-do288-httpd~https://github.com/${RHT_OCP4_GITHUB_USER}/DO288-apps  --context-dir=html-helloworld
+  760  oc logs -f bc/hello-s2i
+  761  oc get pods
+  762  oc expose svc hello-s2i
+  763  oc get route/hello-s2i  -o jsonpath='{.spec.host}{"\n"}'
+  764  curl  http://hello-s2i-${RHT_OCP4_DEV_USER}-apache-s2i.${RHT_OCP4_WILDCARD_DOMAIN}
+  765  oc delete project > ${RHT_OCP4_DEV_USER}-apache-s2i
+  766  oc delete project  ${RHT_OCP4_DEV_USER}-apache-s2i
+  767  sudo podman rm test
+  768  sudo podman rmi -f  localhost/s2i-sample-app  localhost/s2i-do288-httpd  registry.access.redhat.com/ubi8/ubi:8.0
+  769  sudo skopeo delete  docker://quay.io/${RHT_OCP4_QUAY_USER}/s2i-do288-httpd:latest
+
+
+ESEMPIO DI SESSIONE COMPLETA PER S2I PERSONALIZZATA:
+Credo che la creazione dellapp di test serva solo per verificare la build image, ma posso saltarla e passare 
+direttamente all'import della build image stream in openshift
+
+  793  lab custom-s2i start
+  794  ls /home/student/DO288/labs/
+  795  ls /home/student/DO288/labs/custom-s2i/s2i/bin
+  796  vi ~/DO288/labs/custom-s2i/Dockerfile
+  797  pwd
+  798  cd ~/DO288/labs/custom-s2i
+  799  sudo podman build -t s2i-do288-go .
+  810  sudo podman images
+  812  mkdir /home/student/s2i-go-app
+  813  s2i build test/test-app/  s2i-do288-go s2i-go-app  --as-dockerfile /home/student/s2i-go-app/Dockerfile
+  814  cd ~/s2i-go-app
+  815  sudo podman build -t s2i-go-app .
+  816  sudo podman images
+  836  source /usr/local/etc/ocp4.config
+  837  sudo podman login  -u ${RHT_OCP4_QUAY_USER} quay.io
+  838  sudo skopeo copy  containers-storage:localhost/s2i-do288-go  docker://quay.io/${RHT_OCP4_QUAY_USER}/s2i-do288-go
+  839  oc login -u ${RHT_OCP4_DEV_USER}  -p ${RHT_OCP4_DEV_PASSWORD} ${RHT_OCP4_MASTER_API}
+  840  oc new-project ${RHT_OCP4_DEV_USER}-custom-s2i
+  841  podman login -u ${RHT_OCP4_QUAY_USER} quay.io
+  842  oc create secret generic quayio  --from-file .dockerconfigjson=${XDG_RUNTIME_DIR}/containers/auth.json  --type=kubernetes.io/dockerconfigjson
+  843  oc secrets link builder quayio
+  844  oc import-image s2i-do288-go  --from quay.io/${RHT_OCP4_QUAY_USER}/s2i-do288-go  --confirm
+  845  oc get is
+  846  cd
+  847  cd DO288-apps/
+  848  chit checkout master
+  849  git checkout master
+  850  git checkout -b custom-s2i
+  851  git push -u origin custom-s2i
+  852  cd
+  853  oc new-app --as-deployment-config --name greet  s2i-do288-go~https://github.com/${RHT_OCP4_GITHUB_USER}/DO288-apps#custom-s2i  --context-dir=go-hello
+  854  oc logs -f bc/greet
+  855  oc get pods
+  856  oc expose svc greet
+  857  oc get route/greet -o jsonpath='{.spec.host}{"\n"}'
+  858  curl  http://greet-${RHT_OCP4_DEV_USER}-custom-s2i.${RHT_OCP4_WILDCARD_DOMAIN}/user1
+
+
+
+
+
+
+
 
 
